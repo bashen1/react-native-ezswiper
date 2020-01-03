@@ -2,6 +2,7 @@
  * react-native-ezswiper
  * @author Zhu yangjun<zhuyangjun@gmail.com>
  * @url https://github.com/easyui/react-native-ezswiper
+ * @modification jiafengf.wang<jiafengf.wang@qunar.com>
  */
 
 import React, { Component } from 'react';
@@ -14,7 +15,7 @@ import {
     InteractionManager,
 } from 'react-native'
 
-export default class EZSwiper extends Component<{}> {
+export default class EZSwiper extends Component {
     /**
     | -------------------------------------------------------
     | EZSwiper component life
@@ -55,6 +56,7 @@ export default class EZSwiper extends Component<{}> {
         this.refScrollView = this.refScrollView.bind(this)
         this.getRenderRowViews = this.getRenderRowViews.bind(this)
         this.updateAnimated = this.updateAnimated.bind(this)
+        this.turnEnable = this.turnEnable.bind(this)
         this.autoPlay = this.autoPlay.bind(this)
         this.stopAutoPlay = this.stopAutoPlay.bind(this)
 
@@ -86,7 +88,7 @@ export default class EZSwiper extends Component<{}> {
             scaleArray.push(new Animated.Value(1));
             translateArray.push(new Animated.Value(0));
         }
-        this.state = { scaleArray, translateArray };
+        this.state = { scaleArray, translateArray, scrollEnabled:true, scrollToIndex: -1 };
 
         this.events = {
             renderRow: this.renderRow.bind(this),
@@ -149,13 +151,16 @@ export default class EZSwiper extends Component<{}> {
 
     }
 
-
     /**
     | -------------------------------------------------------
     | public api
     | -------------------------------------------------------
     */
     scrollTo(index, animated = true) {
+        this.setState({ scrollToIndex: index })
+        if(this.ezswiper.currentIndex !== index){
+            this.turnEnable(false)
+        }
         this.scrollView && this.scrollView.scrollTo({ [this.ezswiper.scrollToDirection]: this.ezswiper.side * index, animated: animated });
     }
 
@@ -177,8 +182,13 @@ export default class EZSwiper extends Component<{}> {
                 scaleArray[i].setValue(this.ezswiper.cardParams.cardScale);
                 translateArray[i].setValue((currentPageFloat - i) * this.ezswiper.cardParams.cardTranslate);
             }
-
         }
+    }
+
+    turnEnable(enable=true) {
+        this.setState({
+            scrollEnabled: enable
+        })
     }
 
     refScrollView(view) {
@@ -225,8 +235,15 @@ export default class EZSwiper extends Component<{}> {
     }
 
     onDidChange(obj, index) {
-        if (typeof this.props.onDidChange === 'function') {
-            return this.props.onDidChange(...arguments);
+        this.turnEnable(true)
+        // 只有在卡片切断终态进行didchange的调用，为了避免使用scrollTo的时候出现闪烁的情况
+        if(this.state.scrollToIndex < 0 || index == this.state.scrollToIndex){
+            this.setState({
+                scrollToIndex: -1
+            })
+            if (typeof this.props.onDidChange === 'function') {
+                return this.props.onDidChange(...arguments);
+            }
         }
     }
     /**
@@ -236,6 +253,11 @@ export default class EZSwiper extends Component<{}> {
     */
     onScroll(e) {
         if (this.scrollView) {
+            if(this.state.scrollToIndex>-1){
+                this.setState({
+                    scrollToIndex: -1
+                })
+            }
             this.stopAutoPlay()
             let offset = e.nativeEvent.contentOffset[this.ezswiper.scrollToDirection];
             if (this.ezswiper.loop) {
@@ -250,14 +272,12 @@ export default class EZSwiper extends Component<{}> {
 
             let currentPageFloat = offset / this.ezswiper.side;
             const currentPageInt = currentPageFloat % 1
-            if (currentPageInt === 0 || currentPageInt >= 0.9) {
+            if (currentPageInt === 0 || currentPageInt >= 1) {
                 // currentPageFloat = Math.ceil(currentPageFloat)
                 this.willIndex = undefined
                 this.scrollIndex = Math.ceil(currentPageFloat)
                 this.autoPlay()
             }
-
-
 
             const willIndex = Math.round(currentPageFloat);
             if (this.willIndex === undefined && willIndex !== this.scrollIndex) {
@@ -296,11 +316,19 @@ export default class EZSwiper extends Component<{}> {
             views.push(
                 <View key={i} style={{ flexDirection: this.ezswiper.horizontal ? 'row' : 'column' }}>
                     <View style={{ [this.ezswiper.horizontal ? 'width' : 'height']: margin + this.ezswiper.offset, backgroundColor: 'transparent' }} />
-                    <TouchableWithoutFeedback accessible={!!this.props.onPress} onPress={() => this.events.onPress(currentItem, dataSourceIndex)}>
+                    {
+                        // 没有点击需求就不适用touch，不然会事件拦截
+                        !!this.props.onPress ?
+                        <TouchableWithoutFeedback accessible={!!this.props.onPress} onPress={() => this.events.onPress(currentItem, dataSourceIndex)}>
+                            <Animated.View style={{ backgroundColor: 'transparent', width: this.ezswiper.horizontal ? this.ezswiper.cardParams.cardSide : width, height: this.ezswiper.horizontal ? height : this.ezswiper.cardParams.cardSide, transform: [{ [this.ezswiper.horizontal ? 'scaleY' : 'scaleX']: scaleArray[i] }, { [this.ezswiper.horizontal ? 'translateX' : 'translateY']: translateArray[i] }] }} >
+                                {this.events.renderRow(currentItem, dataSourceIndex)}
+                            </Animated.View>
+                        </TouchableWithoutFeedback>
+                        :
                         <Animated.View style={{ backgroundColor: 'transparent', width: this.ezswiper.horizontal ? this.ezswiper.cardParams.cardSide : width, height: this.ezswiper.horizontal ? height : this.ezswiper.cardParams.cardSide, transform: [{ [this.ezswiper.horizontal ? 'scaleY' : 'scaleX']: scaleArray[i] }, { [this.ezswiper.horizontal ? 'translateX' : 'translateY']: translateArray[i] }] }} >
                             {this.events.renderRow(currentItem, dataSourceIndex)}
                         </Animated.View>
-                    </TouchableWithoutFeedback>
+                    }
                     <View style={{ [this.ezswiper.horizontal ? 'width' : 'height']: margin - this.ezswiper.offset, backgroundColor: 'transparent' }} />
                 </View>
             );
@@ -323,6 +351,13 @@ export default class EZSwiper extends Component<{}> {
                     showsVerticalScrollIndicator={false}
                     onLayout={event => {
                         // event.nativeEvent.layout.width
+                    }}
+                    scrollEnabled={this.state.scrollEnabled}
+                    onScrollEndDrag={()=>{
+                        this.turnEnable(false)
+                        setTimeout(() => {
+                            this.turnEnable(true)
+                        }, 200);
                     }}
                 >
                     {this.getRenderRowViews()}
